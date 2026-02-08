@@ -1,0 +1,5 @@
+{
+  "name": "StockFlow",
+  "description": "A modern inventory management dashboard with tracking, invoicing, and product management features.",
+  "requestFramePermissions": []
+}

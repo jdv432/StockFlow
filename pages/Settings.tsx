@@ -281,9 +281,12 @@ const Settings = ({
 
           if (profileError) throw profileError;
 
-          // Update Bio in User Metadata
+          // Update Bio and Avatar in User Metadata (to sync with Session)
           const { error: authError } = await supabase.auth.updateUser({
-            data: { bio: profile.bio }
+            data: {
+              bio: profile.bio,
+              avatar_url: finalAvatarUrl
+            }
           });
 
           if (authError) {

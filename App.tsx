@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { HashRouter, Routes, Route, Link, useLocation, useNavigate, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Link, useLocation, useNavigate, Navigate } from 'react-router-dom';
 import {
   LayoutDashboard,
   Package,
@@ -226,7 +226,10 @@ const LayoutWithProps = ({ children, notifications, setNotifications, onLogout, 
               <p className="text-sm font-medium truncate text-text-main dark:text-gray-200">
                 {displayName}
               </p>
-              <p className="text-xs truncate text-text-secondary dark:text-gray-400 capitalize">{displayRole}</p>
+              <p className="text-xs truncate text-text-secondary dark:text-gray-400 capitalize">
+                {userRole === 'admin' ? 'Admin' : 'User'}
+                {profile?.role && !['admin', 'administrator', 'user'].includes(profile.role.toLowerCase()) ? ` - ${profile.role}` : ''}
+              </p>
             </div>
             <ChevronUp className={`w-4 h-4 text-text-secondary transition-transform duration-200 ${isProfileMenuOpen ? 'rotate-180' : ''}`} />
           </button>
@@ -422,8 +425,10 @@ const AppContent = () => {
     if (user) {
       fetchData();
     }
+  }, [user, loading, navigate, location.pathname]);
 
-    // Listen for Password Recovery event
+  // Separate effect for Auth State Change Listener (handling Password Recovery)
+  useEffect(() => {
     const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === 'PASSWORD_RECOVERY') {
         console.log("Password recovery event detected!");
@@ -434,7 +439,7 @@ const AppContent = () => {
     return () => {
       authListener.subscription.unsubscribe();
     };
-  }, [user, loading, navigate, location.pathname]);
+  }, [navigate]);
 
   const fetchData = async () => {
     if (!user) return;
@@ -442,7 +447,7 @@ const AppContent = () => {
     // Fetch Products
     const { data: productsData } = await supabase.from('products').select('*').order('created_at', { ascending: false });
     if (productsData) {
-      setProducts(productsData.map(p => ({
+      const mappedProducts = productsData.map(p => ({
         ...p,
         qty: p.quantity, // map quantity to qty
         price: `€${p.price.toFixed(2)}`, // map price number to string
@@ -450,7 +455,13 @@ const AppContent = () => {
         customImage: p.image_url, // map DB image_url to customImage
         description: p.description,
         date: new Date(p.created_at).toISOString().split('T')[0]
-      })));
+      }));
+      setProducts(mappedProducts);
+
+      // Extract unique categories from products
+      const productCategories = Array.from(new Set(mappedProducts.map(p => p.category))).filter((c): c is string => !!c);
+      // Merge with defaults
+      setCategories(Array.from(new Set(["Electronics", "Accessories", ...productCategories])));
     }
 
     // Fetch Notifications
@@ -632,7 +643,7 @@ const AppContent = () => {
       <Route path="/inventory" element={
         user ? (
           <LayoutWithProps notifications={notifications} setNotifications={setNotifications} onLogout={handleLogout} userRole="admin" company={company}>
-            <Inventory products={products} onDelete={() => { }} />
+            <Inventory products={products} categories={categories} onDelete={() => { }} />
           </LayoutWithProps>
         ) : <Navigate to="/login" />
       } />
@@ -717,6 +728,8 @@ const AppContent = () => {
         ) : <Navigate to="/login" />
       } />
 
+      {/* Catch all - redirect to home */}
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 };
@@ -724,9 +737,9 @@ const AppContent = () => {
 const App = () => {
   return (
     <AuthProvider>
-      <HashRouter>
+      <BrowserRouter>
         <AppContent />
-      </HashRouter>
+      </BrowserRouter>
     </AuthProvider>
   );
 };

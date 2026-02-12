@@ -55,7 +55,8 @@ const Settings = ({
     name: userRole === 'admin' ? 'John Doe' : 'Team User',
     role: userRole === 'admin' ? 'Administrator' : 'Viewer',
     email: user?.email || (userRole === 'admin' ? 'john.doe@stockflow.com' : 'user@stockflow.com'),
-    avatar: 'https://picsum.photos/id/64/200/200'
+    avatar: 'https://picsum.photos/id/64/200/200',
+    bio: ''
   });
 
   // Update email and fetch profile when user object loads
@@ -75,8 +76,9 @@ const Settings = ({
           setProfile(prev => ({
             ...prev,
             name: profileData.full_name || prev.name,
-            role: profileData.role || prev.role,
-            avatar: profileData.avatar_url || prev.avatar
+            role: user.user_metadata?.job_title || profileData.role || prev.role,
+            avatar: profileData.avatar_url || prev.avatar,
+            bio: user.user_metadata?.bio || ''
           }));
         }
       }
@@ -86,7 +88,6 @@ const Settings = ({
 
   // Password State
   const [passwords, setPasswords] = useState({
-    current: '',
     new: '',
     confirm: ''
   });
@@ -175,11 +176,14 @@ const Settings = ({
 
   const showSuccess = (message: string) => {
     setSuccessMsg(message);
-    setTimeout(() => setSuccessMsg(null), 3000);
+    setTimeout(() => setSuccessMsg(null), 5000);
   };
 
   const handleSave = async (section: string) => {
-    setActiveSection(section);
+    // Only show loading state for non-Security sections to avoid "stuck" feeling on reload
+    if (section !== 'Security') {
+      setActiveSection(section);
+    }
     console.log(`Saving section: ${section}`);
 
     try {
@@ -235,55 +239,72 @@ const Settings = ({
       }
 
       // Handle Profile Update
-      if (section === 'Profile' && user) {
-        let finalAvatarUrl = profile.avatar;
-
-        // Upload Avatar
-        if (avatarFile) {
-          const fileExt = avatarFile.name.split('.').pop();
-          const fileName = `avatar-${user.id}-${Date.now()}.${fileExt}`;
-          const filePath = `${fileName}`;
-
-          const { error: uploadError } = await supabase.storage
-            .from('avatars')
-            .upload(filePath, avatarFile);
-
-          if (uploadError) {
-            console.error("Error uploading avatar:", uploadError);
-            throw uploadError;
-          }
-
-          const { data: { publicUrl } } = supabase.storage
-            .from('avatars')
-            .getPublicUrl(filePath);
-
-          finalAvatarUrl = publicUrl;
+      if (section === 'Profile') {
+        if (!user) {
+          setActiveSection(null);
+          return;
         }
 
-        const { error } = await supabase
-          .from('user_profiles')
-          .update({
-            full_name: profile.name,
-            role: profile.role,
-            avatar_url: finalAvatarUrl
-          })
-          .eq('id', user.id);
+        try {
+          let finalAvatarUrl = profile.avatar;
 
-        if (error) throw error;
+          // Upload Avatar
+          if (avatarFile) {
+            const fileExt = avatarFile.name.split('.').pop();
+            const fileName = `avatar-${user.id}-${Date.now()}.${fileExt}`;
+            const filePath = `${fileName}`;
 
-        await refreshProfile();
-        setActiveSection(null);
-        showSuccess(`${section} updated successfully`);
+            const { error: uploadError } = await supabase.storage
+              .from('avatars')
+              .upload(filePath, avatarFile);
+
+            if (uploadError) {
+              console.error("Error uploading avatar:", uploadError);
+              throw uploadError;
+            }
+
+            const { data: { publicUrl } } = supabase.storage
+              .from('avatars')
+              .getPublicUrl(filePath);
+
+            finalAvatarUrl = publicUrl;
+          }
+
+          const { error: profileError } = await supabase
+            .from('user_profiles')
+            .update({
+              full_name: profile.name,
+              // role: profile.role, // Removed to avoid DB constraint. Stored in metadata instead.
+              avatar_url: finalAvatarUrl
+            })
+            .eq('id', user.id);
+
+          if (profileError) throw profileError;
+
+          // Update Bio in User Metadata
+          const { error: authError } = await supabase.auth.updateUser({
+            data: { bio: profile.bio }
+          });
+
+          if (authError) {
+            console.error("Error updating user metadata:", authError);
+          }
+
+          showSuccess(`${section} updated successfully`);
+
+          // Refresh profile in background
+          refreshProfile().catch(console.error);
+
+        } catch (error) {
+          throw error;
+        } finally {
+          setActiveSection(null);
+        }
       }
 
       // Handle Password Update
       if (section === 'Security') {
         // 1. Basic Validation
-        if (!passwords.current) {
-          alert("Please enter your current password to confirm changes.");
-          setActiveSection(null);
-          return;
-        }
         if (!passwords.new || !passwords.confirm) {
           alert("Please enter a new password and confirm it.");
           setActiveSection(null);
@@ -300,25 +321,7 @@ const Settings = ({
           return;
         }
 
-        // 2. Verify Current Password (Re-authentication)
-        if (!user?.email) {
-          alert("User email not found. Please reload.");
-          setActiveSection(null);
-          return;
-        }
-
-        const { error: signInError } = await supabase.auth.signInWithPassword({
-          email: user.email,
-          password: passwords.current
-        });
-
-        if (signInError) {
-          alert("Incorrect current password.");
-          setActiveSection(null);
-          return;
-        }
-
-        // 3. Update Password
+        // 2. Update Password (No current password required for logged in users)
         const { data, error } = await supabase.auth.updateUser({ password: passwords.new });
 
         if (error) {
@@ -327,17 +330,10 @@ const Settings = ({
         }
 
         console.log("Password updated successfully", data);
-        setPasswords({ current: '', new: '', confirm: '' });
+        setPasswords({ new: '', confirm: '' });
 
-        // Force success message and logout
-        setSuccessMsg("Password updated! Redirecting to login...");
-        setActiveSection(null);
-
-        // Perform logout and navigation without blocking
-        setTimeout(() => {
-          signOut().catch(err => console.error("Sign out error:", err));
-          navigate('/login');
-        }, 1000);
+        // Show success message
+        showSuccess("Contraseña cambiada exitosamente. Porfavor recargue la página");
 
         return;
       }
@@ -382,8 +378,8 @@ const Settings = ({
 
       {/* Success Toast */}
       {successMsg && (
-        <div className="fixed bottom-6 right-6 z-[100] bg-green-600 text-white px-6 py-3 rounded-lg shadow-2xl flex items-center gap-2">
-          <Check className="w-5 h-5" />
+        <div className="fixed bottom-6 right-6 z-[99999] bg-green-600 text-white px-6 py-3 rounded-lg shadow-2xl flex items-center gap-2">
+          <Check className="w-5 h-5 flex-shrink-0" />
           <span className="font-bold">{successMsg}</span>
         </div>
       )}
@@ -570,18 +566,21 @@ const Settings = ({
                 />
               </div>
               <div className="flex flex-col gap-2">
-                <label className="text-sm font-bold text-text-main dark:text-gray-300">Job Title</label>
+                <label className="text-sm font-bold text-text-main dark:text-gray-300">Account Type</label>
                 <input
                   type="text"
-                  name="role"
-                  value={profile.role}
-                  onChange={handleProfileChange}
-                  className="w-full px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 dark:text-white focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all"
+                  value={userRole === 'admin' ? 'Administrator' : 'User'}
+                  readOnly
+                  disabled
+                  className="w-full px-4 py-2.5 rounded-lg border border-gray-200 bg-gray-100 text-gray-500 cursor-not-allowed dark:border-gray-700 dark:bg-gray-800/50 dark:text-gray-400"
                 />
               </div>
               <div className="col-span-1 md:col-span-2 flex flex-col gap-2">
                 <label className="text-sm font-bold text-text-main dark:text-gray-300">Bio</label>
                 <textarea
+                  name="bio"
+                  value={profile.bio}
+                  onChange={handleProfileChange}
                   rows={3}
                   className="w-full px-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 dark:text-white focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all resize-none"
                   placeholder="Tell us a little about yourself..."
@@ -601,7 +600,7 @@ const Settings = ({
             <button
               onClick={() => handleSave('Security')}
               disabled={!!activeSection}
-              className={`text-sm font-bold flex items-center gap-1 transition-colors ${activeSection ? 'opacity-50 cursor-not-allowed' : 'text-primary hover:text-primary-hover'
+              className={`text-sm font-bold flex items-center gap-1 transition-all rounded px-3 py-1.5 ${activeSection ? 'opacity-50 cursor-not-allowed' : 'text-primary hover:text-primary-hover hover:bg-blue-50/50 active:bg-blue-100 dark:hover:bg-blue-900/20 dark:active:bg-blue-900/40'
                 }`}
             >
               {activeSection === 'Security' ? (
@@ -633,21 +632,14 @@ const Settings = ({
 
             <div className="h-px bg-gray-100 dark:bg-gray-700 my-2"></div>
 
-            <h3 className="text-sm font-bold text-text-secondary dark:text-gray-500 uppercase tracking-wider mb-2">Change Password</h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="flex flex-col gap-2">
-                <label className="text-sm font-medium text-text-main dark:text-gray-300">Current Password</label>
-                <div className="relative">
-                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-secondary dark:text-gray-400" />
-                  <input
-                    type="password"
-                    name="current"
-                    value={passwords.current}
-                    onChange={handlePasswordChange}
-                    className="w-full pl-9 pr-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 dark:text-white focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all"
-                  />
-                </div>
-              </div>
+            <h3 className="text-sm font-bold text-text-secondary dark:text-gray-500 uppercase tracking-wider">Change Password</h3>
+            <p className="text-xs text-gray-400 mb-2">
+              Ultimo cambio de contraseña: {user?.updated_at ? new Date(user.updated_at).toLocaleString() : 'N/A'}
+            </p>
+            <p className="text-xs text-blue-600 dark:text-blue-400 mb-4 bg-blue-50 dark:bg-blue-900/10 p-2 rounded border border-blue-100 dark:border-blue-900/30">
+              Nota: Después de cambiar la contraseña, pulse Save. Después recargue la página manualmente para que el cambio sea exitoso.
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="flex flex-col gap-2">
                 <label className="text-sm font-medium text-text-main dark:text-gray-300">New Password</label>
                 <div className="relative">
@@ -658,6 +650,7 @@ const Settings = ({
                     value={passwords.new}
                     onChange={handlePasswordChange}
                     className="w-full pl-9 pr-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 dark:text-white focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all"
+                    placeholder="Min 6 characters"
                   />
                 </div>
               </div>
@@ -671,6 +664,7 @@ const Settings = ({
                     value={passwords.confirm}
                     onChange={handlePasswordChange}
                     className="w-full pl-9 pr-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 dark:text-white focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all"
+                    placeholder="Repeat new password"
                   />
                 </div>
               </div>

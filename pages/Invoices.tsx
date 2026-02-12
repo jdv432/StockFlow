@@ -59,6 +59,10 @@ const Invoices = ({ onAddInvoice }: InvoicesProps) => {
   });
   const [isSortOpen, setIsSortOpen] = useState(false);
 
+  // Filter State
+  const [statusFilter, setStatusFilter] = useState<string>('All');
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
+
   // Upload & Form Modal State
   const [isFormModalOpen, setIsFormModalOpen] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -403,11 +407,14 @@ const Invoices = ({ onAddInvoice }: InvoicesProps) => {
 
   // Logic for Filter
   const filteredInvoices = useMemo(() => {
-    return sortedInvoices.filter(invoice =>
-      invoice.provider.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      invoice.refId.toLowerCase().includes(searchTerm.toLowerCase())
-    );
-  }, [sortedInvoices, searchTerm]);
+    return sortedInvoices.filter(invoice => {
+      const matchesSearch = invoice.provider.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        invoice.refId.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesStatus = statusFilter === 'All' || invoice.status === statusFilter;
+
+      return matchesSearch && matchesStatus;
+    });
+  }, [sortedInvoices, searchTerm, statusFilter]);
 
 
   // Helper Logic for Download (Simulated with jspdf)
@@ -600,10 +607,37 @@ const Invoices = ({ onAddInvoice }: InvoicesProps) => {
             )}
           </div>
 
-          <button className="flex items-center gap-2 px-3 py-2 bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-700 rounded-lg text-sm font-medium text-text-secondary dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
-            <Filter className="w-4 h-4" />
-            Filter
-          </button>
+          <div className="relative">
+            <button
+              onClick={() => setIsFilterOpen(!isFilterOpen)}
+              className={`flex items-center gap-2 px-3 py-2 bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-700 rounded-lg text-sm font-medium transition-colors ${statusFilter !== 'All' ? 'text-primary border-primary/30 bg-primary/5' : 'text-text-secondary dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'}`}
+            >
+              <Filter className="w-4 h-4" />
+              Filter
+              {statusFilter !== 'All' && <span className="ml-1 text-xs bg-primary text-white px-1.5 py-0.5 rounded-full">{statusFilter}</span>}
+            </button>
+
+            {isFilterOpen && (
+              <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-surface-dark rounded-xl shadow-xl border border-gray-100 dark:border-gray-700 overflow-hidden z-20 animate-in fade-in slide-in-from-top-2 duration-200">
+                <div className="p-2">
+                  <p className="text-xs font-bold text-gray-400 uppercase tracking-wider px-2 py-1 mb-1">Status</p>
+                  {['All', 'Paid', 'Pending', 'Draft'].map((status) => (
+                    <button
+                      key={status}
+                      onClick={() => { setStatusFilter(status); setIsFilterOpen(false); }}
+                      className={`w-full px-3 py-2 text-left text-sm rounded-lg transition-colors flex items-center justify-between ${statusFilter === status
+                        ? 'bg-primary/10 text-primary font-bold'
+                        : 'text-text-main dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800'
+                        }`}
+                    >
+                      {status}
+                      {statusFilter === status && <Check className="w-3 h-3" />}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

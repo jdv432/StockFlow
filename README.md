@@ -1,5 +1,7 @@
 # StockFlow - Inventory Management System
 
+URL: stock-flow-theta.vercel.app
+
 ## Descripción General
 
 StockFlow es una aplicación web moderna y robusta diseñada para la gestión eficiente de inventarios y facturación. Permite a las empresas rastrear productos, gestionar stock, generar facturas y visualizar métricas clave en tiempo real a través de un panel de control intuitivo.
